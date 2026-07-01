@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simple-rag — a RAG pipeline you can actually improve</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#131a2e; --panel2:#0f1526; --ink:#e7ecf5;
+    --mut:#93a0bd; --line:#243155; --cyan:#38bdf8; --violet:#a78bfa; --green:#34d399;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#16203c 0%,var(--bg) 55%);
+    color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+  .wrap{max-width:940px;margin:0 auto;padding:0 22px}
+  h1{font-size:clamp(30px,6vw,52px);line-height:1.05;margin:0 0 12px;letter-spacing:-.02em}
+  h2{font-size:26px;margin:56px 0 10px;letter-spacing:-.01em}
+  h3{font-size:18px;margin:26px 0 6px}
+  p{color:#cdd6ea}
+  a{color:var(--cyan);text-decoration:none} a:hover{text-decoration:underline}
+  .lede{font-size:20px;color:var(--mut);max-width:660px}
+  .tag{display:inline-block;font-size:12.5px;color:var(--cyan);border:1px solid var(--line);
+    border-radius:999px;padding:4px 12px;margin-bottom:20px;background:#0e1730}
+  header{padding:70px 0 26px}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
+  .btn{border:1px solid var(--line);padding:11px 18px;border-radius:10px;color:var(--ink);
+    background:var(--panel);font-weight:600}
+  .btn.p{background:linear-gradient(135deg,var(--cyan),var(--violet));color:#07101f;border:0}
+  .muted{color:var(--mut)}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+  .card b{color:#fff}
+  /* code */
+  .code{position:relative;background:#0a0f1e;border:1px solid var(--line);border-radius:12px;
+    margin:14px 0;overflow:hidden}
+  .code pre{margin:0;padding:16px 18px;overflow:auto;font:13.5px/1.6 "SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  .code .cp{position:absolute;top:8px;right:8px;font-size:12px;color:var(--mut);background:#131c34;
+    border:1px solid var(--line);border-radius:7px;padding:4px 9px;cursor:pointer}
+  .code .cp:hover{color:#fff}
+  .k{color:var(--violet)} .s{color:var(--green)} .c{color:#5f6f92} .f{color:var(--cyan)} .n{color:#f0a868}
+  /* diagram */
+  .diagram{background:linear-gradient(180deg,var(--panel2),#0a0f1e);border:1px solid var(--line);
+    border-radius:16px;padding:10px 6px 4px;margin:18px 0}
+  .node rect{fill:var(--panel);stroke:var(--line);rx:11}
+  .node text{fill:var(--ink);font:600 13px sans-serif;text-anchor:middle}
+  .node .sub{fill:var(--cyan);font:11px "SF Mono",monospace}
+  .flow{fill:none;stroke:url(#g);stroke-width:2;opacity:.5}
+  .pulse rect{animation:glow 7s linear infinite}
+  @keyframes glow{0%,14%{stroke:var(--cyan);filter:drop-shadow(0 0 7px var(--cyan))}
+    16%,100%{stroke:var(--line);filter:none}}
+  .dot{fill:var(--cyan)}
+  .fb{fill:none;stroke:var(--violet);stroke-width:1.6;stroke-dasharray:5 5;opacity:.7}
+  .cap{color:var(--mut);font-size:13px;text-align:center;padding:2px 0 10px}
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14.5px}
+  td,th{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+  th{color:var(--mut);font-weight:600}
+  code.i{background:#101a33;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
+    font:12.5px "SF Mono",monospace;color:#dfe7fb}
+  footer{margin:70px 0 40px;color:var(--mut);font-size:14px;border-top:1px solid var(--line);padding-top:22px}
+  .flyw{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+  .flyw svg{flex:0 0 200px}
+  .ring{fill:none;stroke:var(--line);stroke-width:2}
+  .rot{fill:none;stroke:url(#g);stroke-width:3;stroke-linecap:round;stroke-dasharray:70 500;
+    transform-origin:100px 100px;animation:spin 5s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .fnode{fill:var(--panel);stroke:var(--line)} .flab{fill:var(--ink);font:600 12px sans-serif;text-anchor:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <span class="tag">distilled from jxnl/systematically-improving-rag</span>
+  <h1>A RAG pipeline you can<br>actually <span style="background:linear-gradient(135deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent">improve</span>.</h1>
+  <p class="lede">One file. <code class="i">openai</code> + <code class="i">numpy</code>, no vector-DB server.
+    Every tutorial ships <code class="i">answer()</code>. This one ships <code class="i">evaluate()</code> —
+    because <b>recall@k is the only number that tells you if your next change helped.</b></p>
+  <div class="cta">
+    <a class="btn p" href="https://github.com/jxnl/systematically-improving-rag">The course ↗</a>
+    <a class="btn" href="#quickstart">Quickstart</a>
+    <a class="btn" href="#flywheel">The flywheel</a>
+  </div>
+</header>
+
+<h2>The pipeline, end to end</h2>
+<p class="muted">Data flows left→right. The dashed loop is the part everyone skips: <code class="i">evaluate()</code>
+  measures retrieval, hands you the chunks that failed, and you fix those — not vibes.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 1000 235" width="100%" role="img" aria-label="RAG pipeline data flow">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <!-- main flow line -->
+  <path id="main" class="flow" d="M70,92 H930"/>
+  <!-- flowing particles -->
+  <circle class="dot" r="4"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#main"/></animateMotion></circle>
+  <circle class="dot" r="4" opacity=".7"><animateMotion dur="7s" begin="2.33s" repeatCount="indefinite"><mpath href="#main"/></animateMotion></circle>
+  <circle class="dot" r="4" opacity=".5"><animateMotion dur="7s" begin="4.66s" repeatCount="indefinite"><mpath href="#main"/></animateMotion></circle>
+  <!-- feedback loop -->
+  <path class="fb" d="M930,118 C930,195 500,205 357,205 C300,205 300,150 300,120"/>
+  <polygon points="300,110 295,122 305,122" fill="#a78bfa"/>
+  <circle r="3.5" fill="#a78bfa"><animateMotion dur="6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#fbp"/></animateMotion></circle>
+  <path id="fbp" style="display:none" d="M930,118 C930,195 500,205 357,205 C300,205 300,150 300,120"/>
+  <text x="620" y="223" fill="#a78bfa" font-size="12" text-anchor="middle" font-family="SF Mono,monospace">evaluate() → fix the failing chunks</text>
+
+  <!-- nodes -->
+  <g class="node">
+    <g class="pulse" style="--d:0"><rect x="18" y="66" width="104" height="52" rx="11" style="animation-delay:0s"/></g>
+    <text x="70" y="88">Docs</text><text class="sub" x="70" y="106">.txt / .md</text>
+
+    <g class="pulse"><rect x="161" y="66" width="104" height="52" rx="11" style="animation-delay:1s"/></g>
+    <text x="213" y="88">Chunk</text><text class="sub" x="213" y="106">add()</text>
+
+    <g class="pulse"><rect x="305" y="66" width="104" height="52" rx="11" style="animation-delay:2s"/></g>
+    <text x="357" y="88">Embed</text><text class="sub" x="357" y="106">add()</text>
+
+    <g class="pulse"><rect x="448" y="66" width="104" height="52" rx="11" style="animation-delay:3s"/></g>
+    <text x="500" y="85">Vector</text><text x="500" y="99">store</text><text class="sub" x="500" y="114">save()</text>
+
+    <g class="pulse"><rect x="591" y="66" width="104" height="52" rx="11" style="animation-delay:4s"/></g>
+    <text x="643" y="88">Retrieve</text><text class="sub" x="643" y="106">search()</text>
+
+    <g class="pulse"><rect x="735" y="66" width="104" height="52" rx="11" style="animation-delay:5s"/></g>
+    <text x="787" y="88">Rerank</text><text class="sub" x="787" y="106">rerank=True</text>
+
+    <g class="pulse"><rect x="878" y="66" width="104" height="52" rx="11" style="animation-delay:6s"/></g>
+    <text x="930" y="88">Answer</text><text class="sub" x="930" y="106">answer()</text>
+  </g>
+</svg>
+<div class="cap">This animated diagram <b>is</b> the walkthrough — editable SVG, not a video file. Open the page and watch the data move.</div>
+</div>
+
+<h2 id="quickstart">Quickstart — 4 lines, evaluate first</h2>
+<div class="code"><span class="cp">copy</span><pre><span class="c"># pip install openai numpy   •   export OPENAI_API_KEY=sk-...</span>
+<span class="k">from</span> rag <span class="k">import</span> RAG
+
+r = RAG().add(<span class="f">open</span>(<span class="s">"docs.txt"</span>).read().split(<span class="s">"\n\n"</span>))
+<span class="f">print</span>(r.evaluate(k=<span class="n">5</span>))          <span class="c"># ← ALWAYS start here: recall@k, mrr, failures</span>
+<span class="f">print</span>(r.answer(<span class="s">"your question"</span>))</pre></div>
+<p><code class="i">evaluate()</code> generates a question from each chunk and checks whether that chunk comes
+back for its own question. Low recall@k? Your retrieval is broken and no prompt-tuning will save you.
+Read <code class="i">result["failures"]</code> — those chunk indices are your entire to-do list.</p>
+
+<h2 id="flywheel">The flywheel</h2>
+<div class="flyw">
+<svg viewBox="0 0 200 200" width="200" aria-label="RAG flywheel">
+  <circle class="ring" cx="100" cy="100" r="72"/>
+  <circle class="rot" cx="100" cy="100" r="72"/>
+  <g><circle class="fnode" cx="100" cy="28" r="20"/><text class="flab" x="100" y="32">Measure</text></g>
+  <g><circle class="fnode" cx="172" cy="100" r="20"/><text class="flab" x="172" y="104">Analyze</text></g>
+  <g><circle class="fnode" cx="100" cy="172" r="20"/><text class="flab" x="100" y="176">Improve</text></g>
+  <g><circle class="fnode" cx="28" cy="100" r="20"/><text class="flab" x="28" y="104">Iterate</text></g>
+</svg>
+<div style="flex:1;min-width:260px">
+<table>
+  <tr><th>Step</th><th>What you do</th><th>In code</th></tr>
+  <tr><td><b>Measure</b></td><td>Benchmark retrieval before touching anything</td><td><code class="i">evaluate()</code></td></tr>
+  <tr><td><b>Analyze</b></td><td>Read the failures — bad chunks? wrong embedding?</td><td><code class="i">result["failures"]</code></td></tr>
+  <tr><td><b>Improve</b></td><td>Change <i>one</i> thing: chunk size, model, rerank</td><td><code class="i">chunk_chars=…</code></td></tr>
+  <tr><td><b>Iterate</b></td><td>Re-measure. Moved? Keep it. Didn't? Revert.</td><td><code class="i">evaluate()</code></td></tr>
+</table>
+</div>
+</div>
+
+<h2>Upgrades — add each only when recall@k says so</h2>
+<div class="grid">
+  <div class="card"><b>1 · Persist</b><br><span class="muted">Corpus outlives the process. Exact search, zero infra.</span></div>
+  <div class="card"><b>2 · Rerank</b><br><span class="muted">LLM reorders the top-20. The usual next win once recall caps.</span></div>
+  <div class="card"><b>3 · Route</b><br><span class="muted">Send each query to the right collection. Separate routing misses from retrieval misses.</span></div>
+</div>
+
+<h3>1 · Persist — the honest "vector DB"</h3>
+<p class="muted">numpy cosine is exact to ~100k chunks; <code class="i">save()</code> makes it durable. Swap in
+pgvector/LanceDB inside <code class="i">save()</code>/<code class="i">load()</code> when the matrix stops fitting in RAM — not before.</p>
+<div class="code"><span class="cp">copy</span><pre>r.save(<span class="s">"store"</span>)               <span class="c"># → store.npz + store.json</span>
+r = RAG.load(<span class="s">"store"</span>)         <span class="c"># next run: no re-embedding, no API cost</span></pre></div>
+
+<h3>2 · Rerank — and prove it helped</h3>
+<div class="code"><span class="cp">copy</span><pre>base = r.evaluate(k=<span class="n">5</span>)
+lift = r.evaluate(k=<span class="n">5</span>, rerank=<span class="k">True</span>)   <span class="c"># pull 20 by cosine, LLM reorders</span>
+<span class="f">print</span>(base[<span class="s">"recall@k"</span>], <span class="s">"→"</span>, lift[<span class="s">"recall@k"</span>])   <span class="c"># ship it ONLY if this goes up</span>
+
+r.answer(<span class="s">"your question"</span>, rerank=<span class="k">True</span>)</pre></div>
+
+<h3>3 · Route across collections</h3>
+<div class="code"><span class="cp">copy</span><pre><span class="k">from</span> rag <span class="k">import</span> RAG, Router
+
+billing = RAG(<span class="s">"billing"</span>, <span class="s">"invoices, refunds, payment errors"</span>).add(billing_docs)
+api     = RAG(<span class="s">"api"</span>, <span class="s">"endpoints, auth, rate limits"</span>).add(api_docs)
+
+bot = Router([billing, api])
+bot.answer(<span class="s">"why was my card declined?"</span>)   <span class="c"># → routed to billing, then answered</span></pre></div>
+
+<h2>When to reach for what</h2>
+<table>
+  <tr><th>Symptom</th><th>Fix</th></tr>
+  <tr><td>recall@k low, one topic</td><td>tune <code class="i">chunk_chars</code> / <code class="i">overlap</code>, re-<code class="i">evaluate()</code></td></tr>
+  <tr><td>right chunks fetched but ranked low</td><td><code class="i">rerank=True</code></td></tr>
+  <tr><td>mixed topics, wrong docs entirely</td><td><code class="i">Router</code> across collections</td></tr>
+  <tr><td>matrix too big for RAM</td><td>pgvector/LanceDB inside <code class="i">save()</code>/<code class="i">load()</code></td></tr>
+  <tr><td>domain jargon, recall stuck</td><td>fine-tune embeddings (course ch. later) — 6–10% typical</td></tr>
+</table>
+
+<footer>
+  <p>Full source is one file: <a href="https://github.com/jxnl/systematically-improving-rag">rag.py</a>.
+  Run <code class="i">python rag.py</code> for a no-API self-check of the retrieval math.<br>
+  Concepts distilled from Jason Liu's <a href="https://github.com/jxnl/systematically-improving-rag">Systematically Improving RAG</a>.</p>
+</footer>
+</div>
+
+<script>
+document.querySelectorAll('.cp').forEach(b=>b.onclick=()=>{
+  const t=b.parentElement.querySelector('pre').innerText;
+  navigator.clipboard.writeText(t); const o=b.textContent; b.textContent='copied'; setTimeout(()=>b.textContent=o,1200);
+});
+</script>
+</body>
+</html>
