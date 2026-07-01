@@ -73,7 +73,7 @@
 <header>
   <span class="tag">distilled from jxnl/systematically-improving-rag</span>
   <h1>A RAG pipeline you can<br>actually <span style="background:linear-gradient(135deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent">improve</span>.</h1>
-  <p class="lede">One file. <code class="i">openai</code> + <code class="i">numpy</code>, no vector-DB server.
+  <p class="lede">One file. Real <b>ChromaDB</b> vector store + <b>FlashRank</b> cross-encoder, no server.
     Every tutorial ships <code class="i">answer()</code>. This one ships <code class="i">evaluate()</code> —
     because <b>recall@k is the only number that tells you if your next change helped.</b></p>
   <div class="cta">
@@ -119,7 +119,7 @@
     <text x="357" y="88">Embed</text><text class="sub" x="357" y="106">add()</text>
 
     <g class="pulse"><rect x="448" y="66" width="104" height="52" rx="11" style="animation-delay:3s"/></g>
-    <text x="500" y="85">Vector</text><text x="500" y="99">store</text><text class="sub" x="500" y="114">save()</text>
+    <text x="500" y="85">Vector</text><text x="500" y="99">store</text><text class="sub" x="500" y="114">Chroma</text>
 
     <g class="pulse"><rect x="591" y="66" width="104" height="52" rx="11" style="animation-delay:4s"/></g>
     <text x="643" y="88">Retrieve</text><text class="sub" x="643" y="106">search()</text>
@@ -135,7 +135,7 @@
 </div>
 
 <h2 id="quickstart">Quickstart — 4 lines, evaluate first</h2>
-<div class="code"><span class="cp">copy</span><pre><span class="c"># pip install openai numpy   •   export OPENAI_API_KEY=sk-...</span>
+<div class="code"><span class="cp">copy</span><pre><span class="c"># pip install openai chromadb flashrank   •   export OPENAI_API_KEY=sk-...</span>
 <span class="k">from</span> rag <span class="k">import</span> RAG
 
 r = RAG().add(<span class="f">open</span>(<span class="s">"docs.txt"</span>).read().split(<span class="s">"\n\n"</span>))
@@ -168,20 +168,21 @@ Read <code class="i">result["failures"]</code> — those chunk indices are your 
 
 <h2>Upgrades — add each only when recall@k says so</h2>
 <div class="grid">
-  <div class="card"><b>1 · Persist</b><br><span class="muted">Corpus outlives the process. Exact search, zero infra.</span></div>
-  <div class="card"><b>2 · Rerank</b><br><span class="muted">LLM reorders the top-20. The usual next win once recall caps.</span></div>
+  <div class="card"><b>1 · Persist</b><br><span class="muted">Chroma writes the HNSW index to disk. Reopen, don't re-embed.</span></div>
+  <div class="card"><b>2 · Rerank</b><br><span class="muted">FlashRank cross-encoder reorders the top-30. The usual next win once recall caps.</span></div>
   <div class="card"><b>3 · Route</b><br><span class="muted">Send each query to the right collection. Separate routing misses from retrieval misses.</span></div>
 </div>
 
-<h3>1 · Persist — the honest "vector DB"</h3>
-<p class="muted">numpy cosine is exact to ~100k chunks; <code class="i">save()</code> makes it durable. Swap in
-pgvector/LanceDB inside <code class="i">save()</code>/<code class="i">load()</code> when the matrix stops fitting in RAM — not before.</p>
-<div class="code"><span class="cp">copy</span><pre>r.save(<span class="s">"store"</span>)               <span class="c"># → store.npz + store.json</span>
-r = RAG.load(<span class="s">"store"</span>)         <span class="c"># next run: no re-embedding, no API cost</span></pre></div>
+<h3>1 · Persist — ChromaDB on disk</h3>
+<p class="muted">Chroma stores the HNSW index and documents under <code class="i">path</code> automatically —
+no <code class="i">save()</code> call. Reopen the same path next run and skip re-embedding. Swap Chroma for
+hosted Qdrant/pgvector at millions of vectors — the <code class="i">query</code> shape is the same.</p>
+<div class="code"><span class="cp">copy</span><pre>RAG(<span class="s">"docs"</span>, path=<span class="s">"./rag_db"</span>).add(chunks)   <span class="c"># writes ./rag_db</span>
+r = RAG(<span class="s">"docs"</span>, path=<span class="s">"./rag_db"</span>)           <span class="c"># next run: reopens, no re-embedding</span></pre></div>
 
-<h3>2 · Rerank — and prove it helped</h3>
+<h3>2 · Rerank — real cross-encoder, and prove it helped</h3>
 <div class="code"><span class="cp">copy</span><pre>base = r.evaluate(k=<span class="n">5</span>)
-lift = r.evaluate(k=<span class="n">5</span>, rerank=<span class="k">True</span>)   <span class="c"># pull 20 by cosine, LLM reorders</span>
+lift = r.evaluate(k=<span class="n">5</span>, rerank=<span class="k">True</span>)   <span class="c"># pull 30 from Chroma, FlashRank reorders</span>
 <span class="f">print</span>(base[<span class="s">"recall@k"</span>], <span class="s">"→"</span>, lift[<span class="s">"recall@k"</span>])   <span class="c"># ship it ONLY if this goes up</span>
 
 r.answer(<span class="s">"your question"</span>, rerank=<span class="k">True</span>)</pre></div>
@@ -199,9 +200,9 @@ bot.answer(<span class="s">"why was my card declined?"</span>)   <span class="c"
 <table>
   <tr><th>Symptom</th><th>Fix</th></tr>
   <tr><td>recall@k low, one topic</td><td>tune <code class="i">chunk_chars</code> / <code class="i">overlap</code>, re-<code class="i">evaluate()</code></td></tr>
-  <tr><td>right chunks fetched but ranked low</td><td><code class="i">rerank=True</code></td></tr>
+  <tr><td>right chunks fetched but ranked low</td><td><code class="i">rerank=True</code> (FlashRank cross-encoder)</td></tr>
   <tr><td>mixed topics, wrong docs entirely</td><td><code class="i">Router</code> across collections</td></tr>
-  <tr><td>matrix too big for RAM</td><td>pgvector/LanceDB inside <code class="i">save()</code>/<code class="i">load()</code></td></tr>
+  <tr><td>millions of vectors / multi-node</td><td>swap Chroma for hosted Qdrant/pgvector (same <code class="i">query</code>)</td></tr>
   <tr><td>domain jargon, recall stuck</td><td>fine-tune embeddings (course ch. later) — 6–10% typical</td></tr>
 </table>
 

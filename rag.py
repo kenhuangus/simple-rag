@@ -4,22 +4,19 @@ Simple, solid RAG — distilled from jxnl/systematically-improving-rag.
 The lesson of that course in one sentence: RAG is a *retrieval* system you
 improve with measurement, not a magic pipeline. So the method that matters
 here is .evaluate() — it generates synthetic questions from your own chunks
-and measures recall@k. That number is your flywheel. Every upgrade below
-(persistence, reranking, routing) is opt-in and only earns its place when
-evaluate() proves it moves the number.
+and measures recall@k. That number is your flywheel.
 
-No vector DB server, no new deps beyond openai + numpy. numpy cosine over a
-matrix is exact and fast to ~100k chunks; .save()/.load() make it persistent;
-the reranker and router reuse the OpenAI client you already have.
+Real parts, not toys:
+  - Vector DB: ChromaDB (HNSW ANN + on-disk persistence, embedded, no server).
+  - Reranker: FlashRank cross-encoder (real relevance model, ~3MB, no GPU/API).
+  - Embeddings + generation: OpenAI.
 
-Deps: openai, numpy.  Env: OPENAI_API_KEY.
+Deps: openai, chromadb, flashrank.  Env: OPENAI_API_KEY.
 """
 from __future__ import annotations
-import json
 import re
-from pathlib import Path
-import numpy as np
-from openai import OpenAI
+from functools import lru_cache
+import chromadb
 
 EMBED_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"
@@ -27,122 +24,95 @@ CHAT_MODEL = "gpt-4o-mini"
 
 class RAG:
     def __init__(self, name: str = "default", description: str = "",
-                 embed_model: str = EMBED_MODEL, chat_model: str = CHAT_MODEL):
+                 path: str = "./rag_db", embed_model: str = EMBED_MODEL,
+                 chat_model: str = CHAT_MODEL):
+        from openai import OpenAI
         self.client = OpenAI()
-        self.name = name                 # used by Router
-        self.description = description    # what this collection is about (for routing)
-        self.embed_model = embed_model
-        self.chat_model = chat_model
-        self.chunks: list[str] = []
-        self._emb: np.ndarray | None = None  # (n, d), L2-normalized rows
+        self.name = _valid_name(name)
+        self.embed_model, self.chat_model = embed_model, chat_model
+        self.db = chromadb.PersistentClient(path=path)   # persists automatically
+        self.col = self.db.get_or_create_collection(
+            self.name, metadata={"description": description, "hnsw:space": "cosine"})
+
+    @property
+    def description(self) -> str:            # stored in the collection, survives reload
+        return (self.col.metadata or {}).get("description", "")
 
     # --- ingest -----------------------------------------------------------
     def add(self, docs: list[str], chunk_chars: int = 800, overlap: int = 100):
-        """Chunk docs and embed. Call once per corpus, or repeatedly to append."""
-        new = [c for d in docs for c in _chunk(d, chunk_chars, overlap)]
-        if not new:
+        """Chunk, embed, and store in Chroma. Persists to disk under `path`;
+        reopen with RAG(name, path=...) — no re-embedding, no save() needed."""
+        chunks = [c for d in docs for c in _chunk(d, chunk_chars, overlap)]
+        if not chunks:
             return self
-        vecs = self._embed(new)
-        self.chunks += new
-        self._emb = vecs if self._emb is None else np.vstack([self._emb, vecs])
+        base = self.col.count()
+        self.col.add(ids=[str(base + i) for i in range(len(chunks))],
+                     embeddings=self._embed(chunks), documents=chunks)
         return self
 
     # --- retrieve ---------------------------------------------------------
-    def search(self, query: str, k: int = 5, fetch: int = 20,
+    def search(self, query: str, k: int = 5, fetch: int = 30,
                rerank: bool = False) -> list[tuple[str, float]]:
-        """Cosine top-k. With rerank=True, pull `fetch` by cosine then let an
-        LLM reorder them (the usual next win once recall is your ceiling)."""
-        q = self._embed([query])[0]
-        scores = self._emb @ q
-        idx = list(self._topk(q, fetch if rerank else k))
+        """ANN top-k from Chroma. With rerank=True, pull `fetch` candidates then
+        reorder with the FlashRank cross-encoder (the usual next win once recall
+        is your ceiling). Returns (chunk, score) — cosine sim, or rerank score."""
+        res = self.col.query(query_embeddings=self._embed([query]),
+                             n_results=max(fetch, k) if rerank else k)
+        docs, dists = res["documents"][0], res["distances"][0]
+        if not docs:
+            return []
         if rerank:
-            order = self._rerank_order(query, [self.chunks[i] for i in idx])
-            idx = [idx[o] for o in order]
-        idx = idx[:k]
-        return [(self.chunks[i], float(scores[i])) for i in idx]
+            return [(docs[i], s) for i, s in _rank(query, docs)[:k]]
+        return [(d, 1 - float(dist)) for d, dist in zip(docs, dists)]
 
     def answer(self, query: str, k: int = 5, rerank: bool = False) -> str:
         hits = self.search(query, k, rerank=rerank)
         context = "\n\n".join(f"[{i+1}] {c}" for i, (c, _) in enumerate(hits))
-        msg = [
-            {"role": "system", "content":
-             "Answer using ONLY the numbered context. Cite sources like [1]. "
-             "If the context doesn't contain the answer, say so."},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"},
-        ]
-        r = self.client.chat.completions.create(model=self.chat_model, messages=msg)
+        r = self.client.chat.completions.create(
+            model=self.chat_model,
+            messages=[
+                {"role": "system", "content":
+                 "Answer using ONLY the numbered context. Cite sources like [1]. "
+                 "If the context doesn't contain the answer, say so."},
+                {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}])
         return r.choices[0].message.content
 
     # --- the point: measure retrieval ------------------------------------
     def evaluate(self, k: int = 5, sample: int | None = None,
-                 fetch: int = 20, rerank: bool = False) -> dict:
+                 fetch: int = 30, rerank: bool = False) -> dict:
         """The flywheel. For each chunk, generate a question it should answer,
         then check whether that chunk lands in the top-k for its own question.
 
         Compare evaluate() vs evaluate(rerank=True) to PROVE the reranker helps
-        before you ship it. Returns recall@k, MRR, and the failing chunk indices
-        — those failures are your to-do list, not a score to admire."""
-        n = len(self.chunks)
+        before you ship it. Returns recall@k, MRR, and the failing chunk ids —
+        those failures are your to-do list, not a score to admire."""
+        data = self.col.get()
+        ids, docs = data["ids"], data["documents"]
+        n = len(ids)
         targets = range(n) if sample is None else _spread(n, sample)
         hits, ranks, failures = 0, [], []
-        for i in targets:
-            q = self._question_for(self.chunks[i])
-            qvec = self._embed([q])[0]
-            idx = list(self._topk(qvec, max(fetch, k)))
+        for t in targets:
+            q = self._question_for(docs[t])
+            res = self.col.query(query_embeddings=self._embed([q]),
+                                 n_results=max(fetch, k))
+            rids, rdocs = res["ids"][0], res["documents"][0]
             if rerank:
-                order = self._rerank_order(q, [self.chunks[j] for j in idx])
-                idx = [idx[o] for o in order]
-            top = idx[:k]
-            if i in top:
+                rids = [rids[i] for i, _ in _rank(q, rdocs)]
+            top = rids[:k]
+            if ids[t] in top:
                 hits += 1
-                ranks.append(1 / (top.index(i) + 1))
+                ranks.append(1 / (top.index(ids[t]) + 1))
             else:
                 ranks.append(0.0)
-                failures.append(i)
-        m = len(ranks)
+                failures.append(ids[t])
+        m = len(ranks) or 1
         return {"recall@k": hits / m, "mrr": sum(ranks) / m, "k": k,
-                "evaluated": m, "rerank": rerank, "failures": failures}
-
-    # --- persistence (the honest "vector DB") ----------------------------
-    def save(self, path: str):
-        """Persist to {path}.npz + {path}.json. Exact search, zero infra.
-        Swap in pgvector/LanceDB here when the matrix stops fitting in RAM."""
-        np.savez_compressed(f"{path}.npz", emb=self._emb)
-        Path(f"{path}.json").write_text(json.dumps(
-            {"chunks": self.chunks, "name": self.name,
-             "description": self.description, "embed_model": self.embed_model,
-             "chat_model": self.chat_model}))
-
-    @classmethod
-    def load(cls, path: str):
-        meta = json.loads(Path(f"{path}.json").read_text())
-        self = cls(meta["name"], meta["description"],
-                   meta["embed_model"], meta["chat_model"])
-        self.chunks = meta["chunks"]
-        self._emb = np.load(f"{path}.npz")["emb"]
-        return self
+                "evaluated": len(ranks), "rerank": rerank, "failures": failures}
 
     # --- internals --------------------------------------------------------
-    def _topk(self, q: np.ndarray, k: int) -> np.ndarray:
-        """Pure cosine top-k over normalized rows. The one bit worth testing."""
-        scores = self._emb @ q
-        return np.argsort(-scores)[:k]
-
-    def _rerank_order(self, query: str, texts: list[str]) -> list[int]:
-        numbered = "\n".join(f"{i}: {t[:400]}" for i, t in enumerate(texts))
-        r = self.client.chat.completions.create(
-            model=self.chat_model,
-            messages=[{"role": "user", "content":
-                       f"Query: {query}\n\nPassages:\n{numbered}\n\nReturn the "
-                       "passage numbers ordered MOST to LEAST relevant, as a "
-                       "JSON array of integers. Only the array."}])
-        return _parse_order(r.choices[0].message.content, len(texts))
-
-    def _embed(self, texts: list[str]) -> np.ndarray:
+    def _embed(self, texts: list[str]) -> list[list[float]]:
         r = self.client.embeddings.create(model=self.embed_model, input=texts)
-        v = np.array([d.embedding for d in r.data], dtype=np.float32)
-        v /= np.linalg.norm(v, axis=1, keepdims=True) + 1e-9
-        return v
+        return [d.embedding for d in r.data]
 
     def _question_for(self, chunk: str) -> str:
         r = self.client.chat.completions.create(
@@ -176,6 +146,21 @@ class Router:
         return self.route(query).answer(query, **kw)
 
 
+# --- reranker (real cross-encoder, lazy-loaded) ---------------------------
+@lru_cache(maxsize=1)
+def _ranker(max_length: int = 256):
+    from flashrank import Ranker            # ~3MB model, downloaded once, cached
+    return Ranker(max_length=max_length)
+
+
+def _rank(query: str, docs: list[str]) -> list[tuple[int, float]]:
+    """Cross-encoder rerank. Returns (index_into_docs, score), best first."""
+    from flashrank import RerankRequest
+    req = RerankRequest(query=query,
+                        passages=[{"id": i, "text": d} for i, d in enumerate(docs)])
+    return [(o["id"], float(o["score"])) for o in _ranker().rerank(req)]
+
+
 # --- free functions (naive on purpose, pure, testable) --------------------
 def _chunk(text: str, size: int, overlap: int) -> list[str]:
     # ponytail: fixed-char sliding window. Good enough to start; upgrade to
@@ -194,19 +179,6 @@ def _spread(n: int, k: int) -> list[int]:
     return [round(i * (n - 1) / (k - 1)) for i in range(k)]
 
 
-def _parse_order(text: str, n: int) -> list[int]:
-    """Extract a valid permutation of 0..n-1 from an LLM reply; missing indices
-    are appended in original order so a bad reply degrades to no-op, never crash."""
-    seen, out = set(), []
-    for m in re.findall(r"\d+", text):
-        i = int(m)
-        if 0 <= i < n and i not in seen:
-            seen.add(i)
-            out.append(i)
-    out += [i for i in range(n) if i not in seen]
-    return out
-
-
 def _pick(reply: str, names: list[str]) -> str:
     reply = reply.strip().lower()
     for name in names:
@@ -215,29 +187,28 @@ def _pick(reply: str, names: list[str]) -> str:
     return names[0]
 
 
-# --- one runnable check, no API needed ------------------------------------
+def _valid_name(name: str) -> str:
+    # Chroma requires 3-512 chars from [a-zA-Z0-9._-], start/end alphanumeric.
+    s = re.sub(r"[^a-zA-Z0-9._-]", "-", name).strip("-._") or "col"
+    if len(s) < 3:
+        s += "-col"
+    return s[:512]
+
+
+# --- one runnable check: real Chroma ANN, no API/network needed -----------
 def _selfcheck():
-    import tempfile
-    r = RAG.__new__(RAG)                        # skip __init__/OpenAI
-    r.chunks = ["cat", "dog", "fish"]
-    r.name, r.description = "animals", "pets"
-    r.embed_model, r.chat_model = EMBED_MODEL, CHAT_MODEL
-    r._emb = np.array([[1, 0], [0, 1], [1, 1]], np.float32)
-    r._emb /= np.linalg.norm(r._emb, axis=1, keepdims=True)
-    q = np.array([1, 0], np.float32)            # closest to "cat"
-    assert list(r._topk(q, 2)) == [0, 2], "cosine top-k order wrong"
     assert _chunk("abcdefghij", 4, 1) == ["abcd", "defg", "ghij", "j"]
     assert _spread(10, 3) == [0, 4, 9]
-    assert _parse_order("[2, 0]", 3) == [2, 0, 1], "rerank parse/degrade wrong"
-    assert _parse_order("garbage", 2) == [0, 1], "bad reply must no-op"
     assert _pick("use the ANIMALS one", ["docs", "animals"]) == "animals"
     assert _pick("???", ["docs", "animals"]) == "docs", "router must fall back"
-    with tempfile.TemporaryDirectory() as d:    # save/load round-trip, no API
-        p = f"{d}/store"
-        r.save(p)
-        r2 = RAG.load(p)
-        assert r2.chunks == r.chunks and np.allclose(r2._emb, r._emb)
-        assert r2.name == "animals"
+    assert _valid_name("a") == "a-col" and _valid_name("hi there!") == "hi-there"
+
+    c = chromadb.EphemeralClient()           # in-memory, exercises the real ANN
+    col = c.get_or_create_collection("selfcheck", metadata={"hnsw:space": "cosine"})
+    col.add(ids=["0", "1", "2"], embeddings=[[1, 0], [0, 1], [1, 1]],
+            documents=["cat", "dog", "fish"])
+    res = col.query(query_embeddings=[[1, 0]], n_results=2)   # closest to "cat"
+    assert res["ids"][0] == ["0", "2"], f"ANN order wrong: {res['ids'][0]}"
     print("ok")
 
 

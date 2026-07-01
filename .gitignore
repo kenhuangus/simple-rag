@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .env
+rag_db/
+*.sqlite3
+chroma*/
+.gstack/

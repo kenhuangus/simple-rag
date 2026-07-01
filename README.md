@@ -15,6 +15,10 @@ Every RAG tutorial gives you `answer()`. Almost none give you `evaluate()`.
 Here the eval loop is the centerpiece, because recall@k is the only thing that
 tells you whether your next change helped.
 
+Real parts, not toys: **ChromaDB** (HNSW vector DB, embedded, auto-persists to
+disk), **FlashRank** (real cross-encoder reranker, ~3MB, no GPU/API key), OpenAI
+for embeddings + generation.
+
 ## Use
 
 ```bash
@@ -42,16 +46,16 @@ print(r.answer("your question"))
 
 ## Upgrades — add each only when recall@k says so
 
-**1 · Persist** (the honest "vector DB" — exact search, zero infra):
+**1 · Persist** — Chroma auto-persists to disk; just point at a `path`:
 ```python
-r.save("store")          # -> store.npz + store.json
-r = RAG.load("store")    # next run: no re-embedding, no API cost
+RAG("docs", path="./rag_db").add(chunks)   # writes to ./rag_db
+r = RAG("docs", path="./rag_db")           # next run: reopens, no re-embedding
 ```
 
-**2 · Rerank** — and prove it helped before shipping:
+**2 · Rerank** — real cross-encoder, and prove it helped before shipping:
 ```python
 r.evaluate(k=5)                # baseline recall@k
-r.evaluate(k=5, rerank=True)   # pull 20 by cosine, LLM reorders; ship only if higher
+r.evaluate(k=5, rerank=True)   # pull 30 from Chroma, FlashRank reorders; ship only if higher
 r.answer("your question", rerank=True)
 ```
 
@@ -68,9 +72,9 @@ Router([billing, api]).answer("why was my card declined?")   # -> routed, then a
 | Symptom | Fix |
 |---|---|
 | recall@k low, one topic | tune `chunk_chars` / `overlap`, re-`evaluate()` |
-| right chunks fetched but ranked low | `rerank=True` |
+| right chunks fetched but ranked low | `rerank=True` (FlashRank cross-encoder) |
 | mixed topics, wrong docs entirely | `Router` across collections |
-| matrix too big for RAM | pgvector/LanceDB inside `save()`/`load()` |
+| millions of vectors / multi-node | swap Chroma for hosted Qdrant/pgvector (same query shape) |
 | domain jargon, recall stuck | fine-tune embeddings (course, later ch.) — 6–10% typical |
 
 Run `python rag.py` for a no-API self-check of the retrieval math.
