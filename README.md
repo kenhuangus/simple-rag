@@ -1,23 +1,44 @@
 # simple-rag
 
-A RAG pipeline in one file — small enough to read in one sitting, real enough
-to ship.
+A RAG pipeline in one file — small enough to read in one sitting, with real
+components. It's a teaching scaffold, not a hardened production system (no
+batching, retries, or auth — add those before you ship).
 
 **📖 Tutorial site (animated data-flow + copy-paste code): [`docs/index.html`](docs/index.html)**
 — enable GitHub Pages on `/docs` to publish it.
 
 The one idea most RAG tutorials skip:
 
-> **RAG is a retrieval system you improve by measuring it — not a pipeline you
-> build once.** The flywheel is measure → analyze → improve → iterate.
+> **Retrieval quality is the foundation.** If the right chunk never reaches the
+> context, no prompt-tuning fixes the answer. So measure retrieval first, then
+> iterate: measure → analyze → improve → re-measure.
 
 Every RAG tutorial gives you `answer()`. Almost none give you `evaluate()`.
-Here the eval loop is the centerpiece, because recall@k is the only thing that
-tells you whether your next change helped.
+Here the eval loop is the centerpiece — because retrieval is the part that
+silently caps your quality, and the only way to know it improved is to measure.
 
-Real parts, not toys: **ChromaDB** (HNSW vector DB, embedded, auto-persists to
-disk), **FlashRank** (real cross-encoder reranker, ~3MB, no GPU/API key), OpenAI
-for embeddings + generation.
+Real components: **ChromaDB** (HNSW vector DB, embedded, auto-persists to disk),
+**FlashRank** (cross-encoder reranker, `ms-marco-MiniLM-L-12-v2` ≈ 34 MB, runs
+locally, no GPU/API key), OpenAI for embeddings + generation.
+
+## What `evaluate()` measures — and what it does not
+
+`evaluate()` writes a synthetic question from each chunk and checks whether that
+chunk comes back for its own question. Be precise about what that gives you:
+
+- It reports **hit-rate@k** (identical to recall@k when each question has one
+  gold chunk) and **MRR@k** on *synthetic* queries. It's a fast, self-serve
+  retrieval sanity check and a regression signal — **not** a production score.
+- Questions are written *from* the chunk, so they share its vocabulary. Real
+  user queries are harder, so treat the number as an **optimistic upper bound**.
+- Chunk `overlap` causes **false misses**: a question from chunk *i* can be
+  answered by a near-duplicate neighbor, counted as a miss. Inspect failures.
+- It says nothing about **generation faithfulness**, answer relevance, or
+  multi-hop questions. Add a generation eval (e.g. an LLM-judge for
+  groundedness) for those.
+
+The real workflow: build a held-out set of **real** user queries, measure on
+that, read the failures, change one thing, re-measure.
 
 ## Use
 
@@ -30,7 +51,7 @@ export OPENAI_API_KEY=sk-...
 from rag import RAG
 
 r = RAG().add(open("docs.txt").read().split("\n\n"))
-print(r.evaluate(k=5))      # <- start here, ALWAYS: recall@k, mrr, failures
+print(r.evaluate(k=5))      # <- start here: hit-rate@k (=recall@k), MRR@k, failures
 print(r.answer("your question"))
 ```
 
@@ -38,13 +59,14 @@ print(r.answer("your question"))
 
 1. **Measure** — `evaluate()` generates a question from each chunk and checks
    whether that chunk is retrieved for its own question. Gives `recall@k`, `mrr`,
-   and the list of chunks that **failed**.
+   and the list of chunks that **failed** (see the caveats above).
 2. **Analyze** — read `result["failures"]`. Bad chunking? Wrong embedding? Two
-   chunks that need joining?
+   chunks that need joining? A false miss from overlap?
 3. **Improve** — change one thing: `chunk_chars`, embedding model, add rerank.
-4. **Iterate** — re-run `evaluate()`. Moved up? Keep it. Didn't? Revert. No vibes.
+4. **Iterate** — re-run `evaluate()`. Moved up? Keep it. Didn't? Revert.
+   (Question generation runs at temperature 0, so the number is reproducible.)
 
-## Upgrades — add each only when recall@k says so
+## Upgrades — add each only when the metric says so
 
 **1 · Persist** — Chroma auto-persists to disk; just point at a `path`:
 ```python
@@ -74,7 +96,8 @@ Router([billing, api]).answer("why was my card declined?")   # -> routed, then a
 | recall@k low, one topic | tune `chunk_chars` / `overlap`, re-`evaluate()` |
 | right chunks fetched but ranked low | `rerank=True` (FlashRank cross-encoder) |
 | mixed topics, wrong docs entirely | `Router` across collections |
-| millions of vectors / multi-node | swap Chroma for hosted Qdrant/pgvector (same query shape) |
-| domain jargon, recall stuck | fine-tune embeddings on your domain — 6–10% typical |
+| millions of vectors / multi-node | move to a hosted store (Qdrant, pgvector, Pinecone) — same idea (embed query → nearest neighbors), different API |
+| domain jargon, recall stuck | try a bigger embedding model (`text-embedding-3-large`); to *fine-tune* embeddings, switch to an open model (e.g. BGE) — OpenAI embeddings aren't fine-tunable |
 
-Run `python rag.py` for a no-API self-check of the retrieval math.
+Run `python rag.py` for a no-API self-check of the retrieval math (real Chroma
+ANN, offline).

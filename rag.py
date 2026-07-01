@@ -1,14 +1,31 @@
 """
 Simple, solid RAG — a pipeline you can actually improve.
 
-The idea in one sentence: RAG is a *retrieval* system you improve with
-measurement, not a magic pipeline. So the method that matters here is
-.evaluate() — it generates synthetic questions from your own chunks and
-measures recall@k. That number is your flywheel.
+The idea: retrieval quality is the foundation of RAG. If the right chunk never
+makes it into the context, no prompt-tuning fixes the answer. So measure
+retrieval first. .evaluate() does that by generating a synthetic question from
+each chunk and checking whether that chunk comes back for its own question.
 
-Real parts, not toys:
+What .evaluate() measures — and what it does NOT:
+  - It reports hit-rate@k (== recall@k when each question has one gold chunk)
+    and MRR@k over *synthetic* questions. It is a fast, self-serve sanity check
+    on retrieval, not a production quality score.
+  - Synthetic questions are written FROM the chunk, so they share vocabulary
+    with it. That makes retrieval easier than real user queries — treat the
+    number as an optimistic upper bound / regression signal, not ground truth.
+  - Chunk overlap causes false misses: a question from chunk i can be answered
+    by a near-duplicate neighbor, which the metric counts as a miss. Inspect
+    failures; some are artifacts, not real gaps.
+  - It says nothing about generation faithfulness (hallucination), answer
+    relevance, or multi-hop questions that need several chunks. Add a
+    generation eval (e.g. an LLM-judge for groundedness) for those.
+  The real win is the loop: measure on a held-out set of *real* user queries,
+  read the failures, change one thing, re-measure.
+
+Real components (not toys), but this is a minimal teaching scaffold — no
+batching, retries, or auth. Harden before production.
   - Vector DB: ChromaDB (HNSW ANN + on-disk persistence, embedded, no server).
-  - Reranker: FlashRank cross-encoder (real relevance model, ~3MB, no GPU/API).
+  - Reranker: FlashRank cross-encoder (real relevance model, local, no GPU/API).
   - Embeddings + generation: OpenAI.
 
 Deps: openai, chromadb, flashrank.  Env: OPENAI_API_KEY.
@@ -20,6 +37,8 @@ import chromadb
 
 EMBED_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"
+RERANK_MODEL = "ms-marco-MiniLM-L-12-v2"   # solid cross-encoder (~34MB). Swap
+                                           # "ms-marco-TinyBERT-L-2-v2" for tiny/fast.
 
 
 class RAG:
@@ -55,7 +74,9 @@ class RAG:
                rerank: bool = False) -> list[tuple[str, float]]:
         """ANN top-k from Chroma. With rerank=True, pull `fetch` candidates then
         reorder with the FlashRank cross-encoder (the usual next win once recall
-        is your ceiling). Returns (chunk, score) — cosine sim, or rerank score."""
+        is your ceiling). Returns (chunk, score): score is cosine similarity
+        (0..1) for the ANN path, or the reranker's relevance score (not a
+        probability, only meaningful for ordering) for the rerank path."""
         res = self.col.query(query_embeddings=self._embed([query]),
                              n_results=max(fetch, k) if rerank else k)
         docs, dists = res["documents"][0], res["distances"][0]
@@ -69,7 +90,7 @@ class RAG:
         hits = self.search(query, k, rerank=rerank)
         context = "\n\n".join(f"[{i+1}] {c}" for i, (c, _) in enumerate(hits))
         r = self.client.chat.completions.create(
-            model=self.chat_model,
+            model=self.chat_model, temperature=0,
             messages=[
                 {"role": "system", "content":
                  "Answer using ONLY the numbered context. Cite sources like [1]. "
@@ -80,12 +101,18 @@ class RAG:
     # --- the point: measure retrieval ------------------------------------
     def evaluate(self, k: int = 5, sample: int | None = None,
                  fetch: int = 30, rerank: bool = False) -> dict:
-        """The flywheel. For each chunk, generate a question it should answer,
-        then check whether that chunk lands in the top-k for its own question.
+        """Measure retrieval with synthetic questions. For each chunk, generate a
+        question from it, then check whether that chunk returns in the top-k.
 
-        Compare evaluate() vs evaluate(rerank=True) to PROVE the reranker helps
-        before you ship it. Returns recall@k, MRR, and the failing chunk ids —
-        those failures are your to-do list, not a score to admire."""
+        Because each question has exactly one gold chunk, `recall@k` here is
+        identical to hit-rate@k, and `mrr` is truncated at k (MRR@k). These are
+        proxy metrics on synthetic queries — see the module docstring for what
+        they do and do NOT tell you. Use `sample=N` to spot-check a big corpus
+        (N API calls); results are ~reproducible (question gen is temperature 0).
+
+        Compare evaluate() vs evaluate(rerank=True) to check the reranker's lift
+        before shipping it. `failures` are the gold chunk ids that missed —
+        candidates to inspect (some are overlap artifacts, not real gaps)."""
         data = self.col.get()
         ids, docs = data["ids"], data["documents"]
         n = len(ids)
@@ -94,7 +121,7 @@ class RAG:
         for t in targets:
             q = self._question_for(docs[t])
             res = self.col.query(query_embeddings=self._embed([q]),
-                                 n_results=max(fetch, k))
+                                 n_results=max(fetch, k) if rerank else k)
             rids, rdocs = res["ids"][0], res["documents"][0]
             if rerank:
                 rids = [rids[i] for i, _ in _rank(q, rdocs)]
@@ -115,8 +142,9 @@ class RAG:
         return [d.embedding for d in r.data]
 
     def _question_for(self, chunk: str) -> str:
+        # temperature=0 so evaluate() is ~reproducible run-to-run
         r = self.client.chat.completions.create(
-            model=self.chat_model,
+            model=self.chat_model, temperature=0,
             messages=[{"role": "user", "content":
                        "Write one short, specific question a user would ask "
                        "that THIS passage answers. Question only:\n\n" + chunk}])
@@ -148,9 +176,9 @@ class Router:
 
 # --- reranker (real cross-encoder, lazy-loaded) ---------------------------
 @lru_cache(maxsize=1)
-def _ranker(max_length: int = 256):
-    from flashrank import Ranker            # ~3MB model, downloaded once, cached
-    return Ranker(max_length=max_length)
+def _ranker(model: str = RERANK_MODEL, max_length: int = 512):
+    from flashrank import Ranker            # model downloaded once, then cached
+    return Ranker(model_name=model, max_length=max_length)
 
 
 def _rank(query: str, docs: list[str]) -> list[tuple[int, float]]:

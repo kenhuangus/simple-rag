@@ -96,8 +96,8 @@
   <h1>A RAG pipeline you can<br>actually <span class="u">improve</span>.</h1>
   <p class="lede">One file. A real <b>ChromaDB</b> vector store and a <b>FlashRank</b> cross-encoder,
     no server. Every tutorial ships <code class="i">answer()</code>. This one ships
-    <code class="i">evaluate()</code> — because recall@k is the only number that tells you whether your
-    next change helped.</p>
+    <code class="i">evaluate()</code> — because retrieval quietly caps your quality, and the only
+    way to know it improved is to measure it.</p>
   <div class="cta">
     <a class="btn p" href="#quickstart">Get started</a>
     <a class="btn" href="https://github.com/kenhuangus/simple-rag">View on GitHub ↗</a>
@@ -145,11 +145,24 @@
 <span class="k">from</span> rag <span class="k">import</span> RAG
 
 r = RAG().add(<span class="f">open</span>(<span class="s">"docs.txt"</span>).read().split(<span class="s">"\n\n"</span>))
-<span class="f">print</span>(r.evaluate(k=<span class="n">5</span>))          <span class="c"># ← ALWAYS start here: recall@k, mrr, failures</span>
+<span class="f">print</span>(r.evaluate(k=<span class="n">5</span>))          <span class="c"># ← start here: hit-rate@k (=recall@k), MRR@k, failures</span>
 <span class="f">print</span>(r.answer(<span class="s">"your question"</span>))</pre></div>
 <p><code class="i">evaluate()</code> generates a question from each chunk and checks whether that chunk comes
 back for its own question. Low recall@k? Your retrieval is broken and no prompt-tuning will save you.
-Read <code class="i">result["failures"]</code> — those chunk indices are your entire to-do list.</p>
+Read <code class="i">result["failures"]</code> — those chunk ids are candidates to inspect.</p>
+
+<div class="card" style="border-left:4px solid var(--accent);margin-top:18px">
+  <b>Read this before you trust the number</b>
+  <ul style="margin:10px 0 0;padding-left:20px;color:#3a382f">
+    <li>It reports <b>hit-rate@k</b> (= recall@k with one gold chunk per question) and <b>MRR@k</b> on
+      <i>synthetic</i> queries — a retrieval sanity check and regression signal, not a production score.</li>
+    <li>Questions are written <i>from</i> the chunk, so they share its wording. Real user queries are harder —
+      treat this as an <b>optimistic upper bound</b>.</li>
+    <li>Chunk <code class="i">overlap</code> causes <b>false misses</b> (a neighbor answers the question). Inspect failures.</li>
+    <li>It says nothing about <b>generation faithfulness</b> or multi-hop questions — add an LLM-judge for those.</li>
+  </ul>
+  <p style="margin:10px 0 0" class="muted">The real workflow: measure on a held-out set of <b>real</b> user queries, read the failures, change one thing, re-measure.</p>
+</div>
 
 <h2 id="flywheel">The flywheel</h2>
 <div class="flyw">
@@ -208,8 +221,8 @@ bot.answer(<span class="s">"why was my card declined?"</span>)   <span class="c"
   <tr><td>recall@k low, one topic</td><td>tune <code class="i">chunk_chars</code> / <code class="i">overlap</code>, re-<code class="i">evaluate()</code></td></tr>
   <tr><td>right chunks fetched but ranked low</td><td><code class="i">rerank=True</code> (FlashRank cross-encoder)</td></tr>
   <tr><td>mixed topics, wrong docs entirely</td><td><code class="i">Router</code> across collections</td></tr>
-  <tr><td>millions of vectors / multi-node</td><td>swap Chroma for hosted Qdrant/pgvector (same <code class="i">query</code>)</td></tr>
-  <tr><td>domain jargon, recall stuck</td><td>fine-tune embeddings on your domain — 6–10% typical</td></tr>
+  <tr><td>millions of vectors / multi-node</td><td>move to a hosted store (Qdrant, pgvector, Pinecone) — same idea, different API</td></tr>
+  <tr><td>domain jargon, recall stuck</td><td>bigger embedding model (<code class="i">text-embedding-3-large</code>); to <i>fine-tune</i>, switch to an open model (BGE) — OpenAI embeddings aren't fine-tunable</td></tr>
 </table>
 
 <footer>
