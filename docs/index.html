@@ -4,82 +4,103 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>simple-rag — a RAG pipeline you can actually improve</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Newsreader:ital,opsz@0,16..72;1,16..72&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0b1020; --panel:#131a2e; --panel2:#0f1526; --ink:#e7ecf5;
-    --mut:#93a0bd; --line:#243155; --cyan:#38bdf8; --violet:#a78bfa; --green:#34d399;
+    --bg:#f0eee6; --card:#faf9f5; --ink:#141413; --mut:#6b6a60;
+    --line:#dcd8cc; --line2:#c9c4b5; --accent:#cc785c; --accent-d:#b35c40;
+    --sans:"Space Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --serif:"Newsreader",Georgia,"Times New Roman",serif;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#16203c 0%,var(--bg) 55%);
-    color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
-  .wrap{max-width:940px;margin:0 auto;padding:0 22px}
-  h1{font-size:clamp(30px,6vw,52px);line-height:1.05;margin:0 0 12px;letter-spacing:-.02em}
-  h2{font-size:26px;margin:56px 0 10px;letter-spacing:-.01em}
-  h3{font-size:18px;margin:26px 0 6px}
-  p{color:#cdd6ea}
-  a{color:var(--cyan);text-decoration:none} a:hover{text-decoration:underline}
-  .lede{font-size:20px;color:var(--mut);max-width:660px}
-  .tag{display:inline-block;font-size:12.5px;color:var(--cyan);border:1px solid var(--line);
-    border-radius:999px;padding:4px 12px;margin-bottom:20px;background:#0e1730}
-  header{padding:70px 0 26px}
-  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:26px}
-  .btn{border:1px solid var(--line);padding:11px 18px;border-radius:10px;color:var(--ink);
-    background:var(--panel);font-weight:600}
-  .btn.p{background:linear-gradient(135deg,var(--cyan),var(--violet));color:#07101f;border:0}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:19px/1.6 var(--serif);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:0 26px}
+  h1,h2,h3{font-family:var(--sans);letter-spacing:-.02em;font-weight:600}
+  h1{font-size:clamp(38px,6.6vw,68px);line-height:1.02;margin:0 0 20px;font-weight:700}
+  h2{font-size:30px;margin:66px 0 12px}
+  h3{font-size:20px;margin:30px 0 8px}
+  p{color:#33322d}
+  a{color:var(--accent-d);text-decoration:none} a:hover{text-decoration:underline}
+  .u{text-decoration:underline;text-decoration-thickness:5px;text-underline-offset:6px;text-decoration-color:var(--accent)}
+  .lede{font-size:22px;line-height:1.5;color:#3a382f;max-width:680px}
+  header{padding:64px 0 20px}
+  nav{display:flex;align-items:center;justify-content:space-between;padding:26px 0 8px}
+  .brand{font-family:var(--sans);font-weight:700;font-size:20px;letter-spacing:-.01em}
+  .brand span{color:var(--accent)}
+  .navlinks{display:flex;gap:26px;font-family:var(--sans);font-size:15px;font-weight:500}
+  .navlinks a{color:var(--ink)}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:30px}
+  .btn{font-family:var(--sans);font-weight:500;font-size:15px;padding:12px 22px;border-radius:9px;
+    border:1px solid var(--ink);color:var(--ink);background:transparent}
+  .btn.p{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+  .btn:hover{text-decoration:none;background:var(--ink);color:var(--bg)}
+  .tag{display:inline-block;font-family:var(--sans);font-size:13px;font-weight:500;color:var(--accent-d);
+    border:1px solid var(--line2);border-radius:999px;padding:5px 14px;margin-bottom:26px;background:var(--card)}
   .muted{color:var(--mut)}
-  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-top:14px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
-  .card b{color:#fff}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin-top:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px}
+  .card b{font-family:var(--sans);font-size:16px}
   /* code */
-  .code{position:relative;background:#0a0f1e;border:1px solid var(--line);border-radius:12px;
-    margin:14px 0;overflow:hidden}
-  .code pre{margin:0;padding:16px 18px;overflow:auto;font:13.5px/1.6 "SF Mono",ui-monospace,Menlo,Consolas,monospace}
-  .code .cp{position:absolute;top:8px;right:8px;font-size:12px;color:var(--mut);background:#131c34;
-    border:1px solid var(--line);border-radius:7px;padding:4px 9px;cursor:pointer}
-  .code .cp:hover{color:#fff}
-  .k{color:var(--violet)} .s{color:var(--green)} .c{color:#5f6f92} .f{color:var(--cyan)} .n{color:#f0a868}
+  .code{position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    margin:16px 0;overflow:hidden}
+  .code pre{margin:0;padding:18px 20px;overflow:auto;
+    font:14px/1.65 "SF Mono",ui-monospace,Menlo,Consolas,monospace;color:#2a2822}
+  .code .cp{position:absolute;top:9px;right:9px;font-family:var(--sans);font-size:12px;color:var(--mut);
+    background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:4px 10px;cursor:pointer}
+  .code .cp:hover{color:var(--ink);border-color:var(--line2)}
+  .c{color:#a8a295} .s{color:#5f7141} .k{color:var(--accent-d)} .f{color:#3f5876} .n{color:#a86b32}
   /* diagram */
-  .diagram{background:linear-gradient(180deg,var(--panel2),#0a0f1e);border:1px solid var(--line);
-    border-radius:16px;padding:10px 6px 4px;margin:18px 0}
-  .node rect{fill:var(--panel);stroke:var(--line);rx:11}
-  .node text{fill:var(--ink);font:600 13px sans-serif;text-anchor:middle}
-  .node .sub{fill:var(--cyan);font:11px "SF Mono",monospace}
-  .flow{fill:none;stroke:url(#g);stroke-width:2;opacity:.5}
+  .diagram{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:12px 8px 4px;margin:20px 0}
+  .node rect{fill:#fff;stroke:var(--line2)}
+  .node text{fill:var(--ink);font:600 13px var(--sans);text-anchor:middle}
+  .node .sub{fill:var(--accent-d);font:11px "SF Mono",monospace}
+  .flow{fill:none;stroke:var(--accent);stroke-width:2;opacity:.45}
   .pulse rect{animation:glow 7s linear infinite}
-  @keyframes glow{0%,14%{stroke:var(--cyan);filter:drop-shadow(0 0 7px var(--cyan))}
-    16%,100%{stroke:var(--line);filter:none}}
-  .dot{fill:var(--cyan)}
-  .fb{fill:none;stroke:var(--violet);stroke-width:1.6;stroke-dasharray:5 5;opacity:.7}
-  .cap{color:var(--mut);font-size:13px;text-align:center;padding:2px 0 10px}
-  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14.5px}
-  td,th{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
-  th{color:var(--mut);font-weight:600}
-  code.i{background:#101a33;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
-    font:12.5px "SF Mono",monospace;color:#dfe7fb}
-  footer{margin:70px 0 40px;color:var(--mut);font-size:14px;border-top:1px solid var(--line);padding-top:22px}
-  .flyw{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
-  .flyw svg{flex:0 0 200px}
-  .ring{fill:none;stroke:var(--line);stroke-width:2}
-  .rot{fill:none;stroke:url(#g);stroke-width:3;stroke-linecap:round;stroke-dasharray:70 500;
+  @keyframes glow{0%,14%{stroke:var(--accent);filter:drop-shadow(0 0 6px rgba(204,120,92,.65))}
+    16%,100%{stroke:var(--line2);filter:none}}
+  .dot{fill:var(--accent)}
+  .fb{fill:none;stroke:var(--mut);stroke-width:1.5;stroke-dasharray:5 5;opacity:.75}
+  .cap{color:var(--mut);font-size:14px;text-align:center;padding:2px 0 12px;font-style:italic}
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:16px}
+  td,th{border-bottom:1px solid var(--line);padding:11px 10px;text-align:left;vertical-align:top}
+  th{color:var(--mut);font-family:var(--sans);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  code.i{background:#eae6d9;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
+    font:13px "SF Mono",monospace;color:#4a453a}
+  footer{margin:76px 0 46px;color:var(--mut);font-size:16px;border-top:1px solid var(--line);padding-top:24px}
+  .flyw{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+  .ring{fill:none;stroke:var(--line2);stroke-width:2}
+  .rot{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;stroke-dasharray:70 500;
     transform-origin:100px 100px;animation:spin 5s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .fnode{fill:var(--panel);stroke:var(--line)} .flab{fill:var(--ink);font:600 12px sans-serif;text-anchor:middle}
+  .fnode{fill:#fff;stroke:var(--line2)} .flab{fill:var(--ink);font:600 12px var(--sans);text-anchor:middle}
 </style>
 </head>
 <body>
 <div class="wrap">
 
+<nav>
+  <div class="brand">simple<span>·</span>rag</div>
+  <div class="navlinks">
+    <a href="#quickstart">Quickstart</a>
+    <a href="#flywheel">Flywheel</a>
+    <a href="https://github.com/kenhuangus/simple-rag">GitHub</a>
+  </div>
+</nav>
+
 <header>
   <span class="tag">one file · real vector DB + reranker · a built-in eval loop</span>
-  <h1>A RAG pipeline you can<br>actually <span style="background:linear-gradient(135deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent">improve</span>.</h1>
-  <p class="lede">One file. Real <b>ChromaDB</b> vector store + <b>FlashRank</b> cross-encoder, no server.
-    Every tutorial ships <code class="i">answer()</code>. This one ships <code class="i">evaluate()</code> —
-    because <b>recall@k is the only number that tells you if your next change helped.</b></p>
+  <h1>A RAG pipeline you can<br>actually <span class="u">improve</span>.</h1>
+  <p class="lede">One file. A real <b>ChromaDB</b> vector store and a <b>FlashRank</b> cross-encoder,
+    no server. Every tutorial ships <code class="i">answer()</code>. This one ships
+    <code class="i">evaluate()</code> — because recall@k is the only number that tells you whether your
+    next change helped.</p>
   <div class="cta">
-    <a class="btn p" href="https://github.com/kenhuangus/simple-rag">GitHub ↗</a>
-    <a class="btn" href="#quickstart">Quickstart</a>
-    <a class="btn" href="#flywheel">The flywheel</a>
+    <a class="btn p" href="#quickstart">Get started</a>
+    <a class="btn" href="https://github.com/kenhuangus/simple-rag">View on GitHub ↗</a>
   </div>
 </header>
 
@@ -89,49 +110,34 @@
 
 <div class="diagram">
 <svg viewBox="0 0 1000 235" width="100%" role="img" aria-label="RAG pipeline data flow">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#a78bfa"/>
-    </linearGradient>
-  </defs>
-  <!-- main flow line -->
   <path id="main" class="flow" d="M70,92 H930"/>
-  <!-- flowing particles -->
   <circle class="dot" r="4"><animateMotion dur="7s" repeatCount="indefinite"><mpath href="#main"/></animateMotion></circle>
   <circle class="dot" r="4" opacity=".7"><animateMotion dur="7s" begin="2.33s" repeatCount="indefinite"><mpath href="#main"/></animateMotion></circle>
   <circle class="dot" r="4" opacity=".5"><animateMotion dur="7s" begin="4.66s" repeatCount="indefinite"><mpath href="#main"/></animateMotion></circle>
-  <!-- feedback loop -->
   <path class="fb" d="M930,118 C930,195 500,205 357,205 C300,205 300,150 300,120"/>
-  <polygon points="300,110 295,122 305,122" fill="#a78bfa"/>
-  <circle r="3.5" fill="#a78bfa"><animateMotion dur="6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#fbp"/></animateMotion></circle>
+  <polygon points="300,110 295,122 305,122" fill="#6b6a60"/>
+  <circle r="3.5" fill="#cc785c"><animateMotion dur="6s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#fbp"/></animateMotion></circle>
   <path id="fbp" style="display:none" d="M930,118 C930,195 500,205 357,205 C300,205 300,150 300,120"/>
-  <text x="620" y="223" fill="#a78bfa" font-size="12" text-anchor="middle" font-family="SF Mono,monospace">evaluate() → fix the failing chunks</text>
+  <text x="620" y="223" fill="#b35c40" font-size="12" text-anchor="middle" font-family="SF Mono,monospace">evaluate() → fix the failing chunks</text>
 
-  <!-- nodes -->
   <g class="node">
-    <g class="pulse" style="--d:0"><rect x="18" y="66" width="104" height="52" rx="11" style="animation-delay:0s"/></g>
+    <g class="pulse"><rect x="18" y="66" width="104" height="52" rx="12" style="animation-delay:0s"/></g>
     <text x="70" y="88">Docs</text><text class="sub" x="70" y="106">.txt / .md</text>
-
-    <g class="pulse"><rect x="161" y="66" width="104" height="52" rx="11" style="animation-delay:1s"/></g>
+    <g class="pulse"><rect x="161" y="66" width="104" height="52" rx="12" style="animation-delay:1s"/></g>
     <text x="213" y="88">Chunk</text><text class="sub" x="213" y="106">add()</text>
-
-    <g class="pulse"><rect x="305" y="66" width="104" height="52" rx="11" style="animation-delay:2s"/></g>
+    <g class="pulse"><rect x="305" y="66" width="104" height="52" rx="12" style="animation-delay:2s"/></g>
     <text x="357" y="88">Embed</text><text class="sub" x="357" y="106">add()</text>
-
-    <g class="pulse"><rect x="448" y="66" width="104" height="52" rx="11" style="animation-delay:3s"/></g>
+    <g class="pulse"><rect x="448" y="66" width="104" height="52" rx="12" style="animation-delay:3s"/></g>
     <text x="500" y="85">Vector</text><text x="500" y="99">store</text><text class="sub" x="500" y="114">Chroma</text>
-
-    <g class="pulse"><rect x="591" y="66" width="104" height="52" rx="11" style="animation-delay:4s"/></g>
+    <g class="pulse"><rect x="591" y="66" width="104" height="52" rx="12" style="animation-delay:4s"/></g>
     <text x="643" y="88">Retrieve</text><text class="sub" x="643" y="106">search()</text>
-
-    <g class="pulse"><rect x="735" y="66" width="104" height="52" rx="11" style="animation-delay:5s"/></g>
+    <g class="pulse"><rect x="735" y="66" width="104" height="52" rx="12" style="animation-delay:5s"/></g>
     <text x="787" y="88">Rerank</text><text class="sub" x="787" y="106">rerank=True</text>
-
-    <g class="pulse"><rect x="878" y="66" width="104" height="52" rx="11" style="animation-delay:6s"/></g>
+    <g class="pulse"><rect x="878" y="66" width="104" height="52" rx="12" style="animation-delay:6s"/></g>
     <text x="930" y="88">Answer</text><text class="sub" x="930" y="106">answer()</text>
   </g>
 </svg>
-<div class="cap">This animated diagram <b>is</b> the walkthrough — editable SVG, not a video file. Open the page and watch the data move.</div>
+<div class="cap">This animated diagram is the walkthrough — editable SVG, not a video file. Open the page and watch the data move.</div>
 </div>
 
 <h2 id="quickstart">Quickstart — 4 lines, evaluate first</h2>
@@ -155,7 +161,7 @@ Read <code class="i">result["failures"]</code> — those chunk indices are your 
   <g><circle class="fnode" cx="100" cy="172" r="20"/><text class="flab" x="100" y="176">Improve</text></g>
   <g><circle class="fnode" cx="28" cy="100" r="20"/><text class="flab" x="28" y="104">Iterate</text></g>
 </svg>
-<div style="flex:1;min-width:260px">
+<div style="flex:1;min-width:280px">
 <table>
   <tr><th>Step</th><th>What you do</th><th>In code</th></tr>
   <tr><td><b>Measure</b></td><td>Benchmark retrieval before touching anything</td><td><code class="i">evaluate()</code></td></tr>
