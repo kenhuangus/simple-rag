@@ -136,6 +136,35 @@ class RAG:
         return {"recall@k": hits / m, "mrr": sum(ranks) / m, "k": k,
                 "evaluated": len(ranks), "rerank": rerank, "failures": failures}
 
+    def score(self, golden: list[dict], k: int = 5, fetch: int = 30,
+              rerank: bool = False) -> dict:
+        """Benchmark retrieval against a GOLDEN DATASET of real, labeled queries
+        — the number you actually trust (evaluate() is only a synthetic warm-up).
+
+        golden: list of {"query": str, "relevant": str | list[str]}, where each
+        `relevant` is a text snippet a correct chunk must contain. Matching by
+        content (not chunk id) keeps your labels valid when you re-chunk — the
+        single most useful property of a durable RAG benchmark.
+
+        Returns recall@k (share of queries whose relevant chunk was retrieved),
+        MRR@k, and the `misses` (queries that failed — your to-do list)."""
+        hits, ranks, misses = 0, [], []
+        for item in golden:
+            rel = item["relevant"]
+            rel = [rel] if isinstance(rel, str) else rel
+            docs = [c for c, _ in self.search(item["query"], k=k, fetch=fetch,
+                                              rerank=rerank)]
+            rank = _first_hit(docs, rel)
+            if rank:
+                hits += 1
+                ranks.append(1 / rank)
+            else:
+                ranks.append(0.0)
+                misses.append(item["query"])
+        m = len(golden) or 1
+        return {"recall@k": hits / m, "mrr": sum(ranks) / m, "k": k,
+                "evaluated": len(golden), "rerank": rerank, "misses": misses}
+
     # --- internals --------------------------------------------------------
     def _embed(self, texts: list[str]) -> list[list[float]]:
         r = self.client.embeddings.create(model=self.embed_model, input=texts)
@@ -207,6 +236,17 @@ def _spread(n: int, k: int) -> list[int]:
     return [round(i * (n - 1) / (k - 1)) for i in range(k)]
 
 
+def _first_hit(docs: list[str], relevant: list[str]) -> int:
+    """1-based rank of the first retrieved doc containing any relevant snippet,
+    or 0 if none. Content match, so it survives re-chunking. The one bit of
+    benchmark logic worth a test."""
+    for i, d in enumerate(docs):
+        low = d.lower()
+        if any(s.lower() in low for s in relevant):
+            return i + 1
+    return 0
+
+
 def _pick(reply: str, names: list[str]) -> str:
     reply = reply.strip().lower()
     for name in names:
@@ -230,6 +270,8 @@ def _selfcheck():
     assert _pick("use the ANIMALS one", ["docs", "animals"]) == "animals"
     assert _pick("???", ["docs", "animals"]) == "docs", "router must fall back"
     assert _valid_name("a") == "a-col" and _valid_name("hi there!") == "hi-there"
+    assert _first_hit(["a cat sat", "a dog ran"], ["DOG"]) == 2, "content match rank"
+    assert _first_hit(["nope"], ["missing"]) == 0, "no hit -> 0"
 
     c = chromadb.EphemeralClient()           # in-memory, exercises the real ANN
     col = c.get_or_create_collection("selfcheck", metadata={"hnsw:space": "cosine"})

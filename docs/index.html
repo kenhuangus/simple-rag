@@ -185,7 +185,34 @@ Read <code class="i">result["failures"]</code> — those chunk ids are candidate
 </div>
 </div>
 
-<h2>Upgrades — add each only when recall@k says so</h2>
+<h2>Build a real benchmark</h2>
+<p class="muted"><code class="i">evaluate()</code> is a synthetic warm-up. The number you actually report comes from a
+<b>benchmark</b> — and a benchmark is not a golden dataset. The <b>golden dataset</b> is the labeled
+data; the <b>benchmark</b> is that data <i>plus</i> metrics <i>plus</i> a repeatable harness.</p>
+
+<div class="grid">
+  <div class="card"><b>1 · Collect real queries</b><br><span class="muted">From logs, tickets, or an expert. Cold start: LLM drafts, a human edits and keeps the good ones.</span></div>
+  <div class="card"><b>2 · Label by content</b><br><span class="muted">Record a snippet a correct chunk must contain — not a chunk id. Survives re-chunking.</span></div>
+  <div class="card"><b>3 · Cover + freeze</b><br><span class="muted">Easy, hard, multi-hop, some unanswerable. ~50–100 to start. Version it; grow it from real failures.</span></div>
+</div>
+
+<h3>Store the golden dataset as JSONL</h3>
+<div class="code"><span class="cp">copy</span><pre><span class="c"># golden.jsonl — one real, labeled query per line</span>
+{<span class="s">"query"</span>: <span class="s">"what city is the capital of France?"</span>, <span class="s">"relevant"</span>: <span class="s">"capital of France"</span>}
+{<span class="s">"query"</span>: <span class="s">"which organelle makes energy in cells?"</span>, <span class="s">"relevant"</span>: <span class="s">"powerhouse of the cell"</span>}
+{<span class="s">"query"</span>: <span class="s">"how high is Everest?"</span>, <span class="s">"relevant"</span>: <span class="s">"8,849 meters"</span>}</pre></div>
+
+<h3>Run the benchmark</h3>
+<div class="code"><span class="cp">copy</span><pre><span class="k">import</span> json
+golden = [json.loads(l) <span class="k">for</span> l <span class="k">in</span> <span class="f">open</span>(<span class="s">"golden.jsonl"</span>)]
+
+<span class="f">print</span>(r.score(golden, k=<span class="n">5</span>))                <span class="c"># recall@k + MRR@k over REAL queries</span>
+<span class="f">print</span>(r.score(golden, k=<span class="n">5</span>, rerank=<span class="k">True</span>))   <span class="c"># does rerank help on YOUR data?</span>
+<span class="c"># result["misses"] = the queries that failed — your to-do list</span></pre></div>
+<p class="muted">A hit counts when any retrieved chunk contains a labeled snippet, so your labels stay valid when you
+re-chunk. <b>This</b> is the number to track over time — not the synthetic one.</p>
+
+<h2>Upgrades — add each only when the metric says so</h2>
 <div class="grid">
   <div class="card"><b>1 · Persist</b><br><span class="muted">Chroma writes the HNSW index to disk. Reopen, don't re-embed.</span></div>
   <div class="card"><b>2 · Rerank</b><br><span class="muted">FlashRank cross-encoder reorders the top-30. The usual next win once recall caps.</span></div>
@@ -194,8 +221,9 @@ Read <code class="i">result["failures"]</code> — those chunk ids are candidate
 
 <h3>1 · Persist — ChromaDB on disk</h3>
 <p class="muted">Chroma stores the HNSW index and documents under <code class="i">path</code> automatically —
-no <code class="i">save()</code> call. Reopen the same path next run and skip re-embedding. Swap Chroma for
-hosted Qdrant/pgvector at millions of vectors — the <code class="i">query</code> shape is the same.</p>
+no <code class="i">save()</code> call. Reopen the same path next run and skip re-embedding. At millions of
+vectors, move to a hosted store (Qdrant, pgvector, Pinecone) — same idea (embed query → nearest
+neighbors), different API.</p>
 <div class="code"><span class="cp">copy</span><pre>RAG(<span class="s">"docs"</span>, path=<span class="s">"./rag_db"</span>).add(chunks)   <span class="c"># writes ./rag_db</span>
 r = RAG(<span class="s">"docs"</span>, path=<span class="s">"./rag_db"</span>)           <span class="c"># next run: reopens, no re-embedding</span></pre></div>
 

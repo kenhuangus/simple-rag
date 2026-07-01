@@ -66,6 +66,53 @@ print(r.answer("your question"))
 4. **Iterate** — re-run `evaluate()`. Moved up? Keep it. Didn't? Revert.
    (Question generation runs at temperature 0, so the number is reproducible.)
 
+## Build a real benchmark (golden dataset)
+
+`evaluate()` is a *synthetic warm-up*. The number you actually trust comes from a
+**benchmark**: a **golden dataset** of real, labeled queries, plus your metrics,
+run the same way every time. (They're not the same thing — the *golden dataset*
+is the labeled data; the *benchmark* is that data + metrics + a repeatable
+harness.)
+
+**How to build the golden dataset**
+
+1. **Collect real queries.** Pull from logs, support tickets, or a domain expert.
+   Cold start? Have `evaluate()` draft synthetic questions, then have a **human
+   edit and keep the good ones** — LLM drafts, human owns the label.
+2. **Label what "relevant" means.** For each query, record a text snippet that a
+   correct chunk must contain. Labeling by *content*, not chunk id, keeps the
+   dataset valid when you re-chunk — the single most useful property here.
+3. **Cover the query types** you actually get: easy and hard, single-hop and
+   multi-hop, plus a few unanswerable ones (the right answer is "I don't know").
+4. **Size it** for a stable signal — ~50–100 queries to start, more for
+   confidence. **Freeze and version it** so scores compare across runs; grow it
+   by adding every real production failure.
+5. **Pick metrics.** Retrieval: recall@k, MRR/nDCG. Generation (next layer):
+   faithfulness/groundedness and answer correctness via an LLM-judge.
+
+**Store it as JSONL** (`golden.jsonl`):
+
+```json
+{"query": "what city is the capital of France?", "relevant": "capital of France"}
+{"query": "which organelle makes energy in cells?", "relevant": "powerhouse of the cell"}
+{"query": "how high is Everest?", "relevant": "8,849 meters"}
+```
+
+**Run the benchmark:**
+
+```python
+import json
+golden = [json.loads(l) for l in open("golden.jsonl")]
+
+print(r.score(golden, k=5))                 # recall@k + MRR@k over REAL queries
+print(r.score(golden, k=5, rerank=True))    # does the reranker help on YOUR data?
+# result["misses"] = the queries that failed — your to-do list
+```
+
+`score()` counts a hit when any retrieved chunk contains a labeled snippet, so
+your labels survive re-chunking. This is the number to report and track over
+time — not the synthetic one.
+
 ## Upgrades — add each only when the metric says so
 
 **1 · Persist** — Chroma auto-persists to disk; just point at a `path`:
