@@ -1,10 +1,10 @@
 """
-Simple, solid RAG — distilled from jxnl/systematically-improving-rag.
+Simple, solid RAG — a pipeline you can actually improve.
 
-The lesson of that course in one sentence: RAG is a *retrieval* system you
-improve with measurement, not a magic pipeline. So the method that matters
-here is .evaluate() — it generates synthetic questions from your own chunks
-and measures recall@k. That number is your flywheel.
+The idea in one sentence: RAG is a *retrieval* system you improve with
+measurement, not a magic pipeline. So the method that matters here is
+.evaluate() — it generates synthetic questions from your own chunks and
+measures recall@k. That number is your flywheel.
 
 Real parts, not toys:
   - Vector DB: ChromaDB (HNSW ANN + on-disk persistence, embedded, no server).
@@ -124,11 +124,11 @@ class RAG:
 
 
 class Router:
-    """Send each query to the right collection. The course's two-level metric:
-    a wrong answer is either a routing miss OR a retrieval miss — this class
-    lets you separate the two. Give each RAG a clear .description and the LLM
-    picks; upgrade to a fine-tuned classifier only when routing accuracy caps
-    your numbers."""
+    """Send each query to the right collection. Think in two levels: a wrong
+    answer is either a routing miss OR a retrieval miss — this class lets you
+    separate the two. Give each RAG a clear .description and the LLM picks;
+    upgrade to a fine-tuned classifier only when routing accuracy caps your
+    numbers."""
     def __init__(self, rags: list[RAG]):
         self.rags = {r.name: r for r in rags}
 

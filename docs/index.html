@@ -71,13 +71,13 @@
 <div class="wrap">
 
 <header>
-  <span class="tag">distilled from jxnl/systematically-improving-rag</span>
+  <span class="tag">one file · real vector DB + reranker · a built-in eval loop</span>
   <h1>A RAG pipeline you can<br>actually <span style="background:linear-gradient(135deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent">improve</span>.</h1>
   <p class="lede">One file. Real <b>ChromaDB</b> vector store + <b>FlashRank</b> cross-encoder, no server.
     Every tutorial ships <code class="i">answer()</code>. This one ships <code class="i">evaluate()</code> —
     because <b>recall@k is the only number that tells you if your next change helped.</b></p>
   <div class="cta">
-    <a class="btn p" href="https://github.com/jxnl/systematically-improving-rag">The course ↗</a>
+    <a class="btn p" href="https://github.com/kenhuangus/simple-rag">GitHub ↗</a>
     <a class="btn" href="#quickstart">Quickstart</a>
     <a class="btn" href="#flywheel">The flywheel</a>
   </div>
@@ -203,13 +203,12 @@ bot.answer(<span class="s">"why was my card declined?"</span>)   <span class="c"
   <tr><td>right chunks fetched but ranked low</td><td><code class="i">rerank=True</code> (FlashRank cross-encoder)</td></tr>
   <tr><td>mixed topics, wrong docs entirely</td><td><code class="i">Router</code> across collections</td></tr>
   <tr><td>millions of vectors / multi-node</td><td>swap Chroma for hosted Qdrant/pgvector (same <code class="i">query</code>)</td></tr>
-  <tr><td>domain jargon, recall stuck</td><td>fine-tune embeddings (course ch. later) — 6–10% typical</td></tr>
+  <tr><td>domain jargon, recall stuck</td><td>fine-tune embeddings on your domain — 6–10% typical</td></tr>
 </table>
 
 <footer>
-  <p>Full source is one file: <a href="https://github.com/jxnl/systematically-improving-rag">rag.py</a>.
-  Run <code class="i">python rag.py</code> for a no-API self-check of the retrieval math.<br>
-  Concepts distilled from Jason Liu's <a href="https://github.com/jxnl/systematically-improving-rag">Systematically Improving RAG</a>.</p>
+  <p>Full source is one file: <a href="https://github.com/kenhuangus/simple-rag">rag.py</a>.
+  Run <code class="i">python rag.py</code> for a no-API self-check of the retrieval math.</p>
 </footer>
 </div>
 

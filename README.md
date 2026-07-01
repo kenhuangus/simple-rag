@@ -1,12 +1,12 @@
 # simple-rag
 
-A RAG pipeline in one file, distilled from
-[jxnl/systematically-improving-rag](https://github.com/jxnl/systematically-improving-rag).
+A RAG pipeline in one file — small enough to read in one sitting, real enough
+to ship.
 
 **📖 Tutorial site (animated data-flow + copy-paste code): [`docs/index.html`](docs/index.html)**
 — enable GitHub Pages on `/docs` to publish it.
 
-That course's real lesson, cutting through the noise:
+The one idea most RAG tutorials skip:
 
 > **RAG is a retrieval system you improve by measuring it — not a pipeline you
 > build once.** The flywheel is measure → analyze → improve → iterate.
@@ -75,6 +75,6 @@ Router([billing, api]).answer("why was my card declined?")   # -> routed, then a
 | right chunks fetched but ranked low | `rerank=True` (FlashRank cross-encoder) |
 | mixed topics, wrong docs entirely | `Router` across collections |
 | millions of vectors / multi-node | swap Chroma for hosted Qdrant/pgvector (same query shape) |
-| domain jargon, recall stuck | fine-tune embeddings (course, later ch.) — 6–10% typical |
+| domain jargon, recall stuck | fine-tune embeddings on your domain — 6–10% typical |
 
 Run `python rag.py` for a no-API self-check of the retrieval math.
